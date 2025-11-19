@@ -14,6 +14,12 @@ export enum DisplayMode {
   RASTER = 'RASTER'
 }
 
+export enum ContentMode {
+  PRESET = 'PRESET',
+  DRAW = 'DRAW',
+  TEXT = 'TEXT'
+}
+
 export interface VectorPoint {
   x: number;
   y: number;
