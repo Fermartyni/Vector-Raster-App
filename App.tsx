@@ -3,12 +3,16 @@ import RetroScreen from './components/RetroScreen';
 import TerminalOutput from './components/TerminalOutput';
 import { chatWithExpert, generateVectorExplanation } from './services/geminiService';
 import { DisplayMode, ChatMessage, MessageRole, ContentMode, VectorPoint } from './types';
-import { Monitor, Zap, Terminal, Send, Activity, PenTool, Type, Play, RotateCcw } from 'lucide-react';
+import { Monitor, Zap, Terminal, Send, Activity, PenTool, Type, Play, RotateCcw, Sliders } from 'lucide-react';
 
 const App: React.FC = () => {
   // Display State
   const [mode, setMode] = useState<DisplayMode>(DisplayMode.VECTOR);
   const [contentMode, setContentMode] = useState<ContentMode>(ContentMode.PRESET);
+  
+  // Simulation Controls
+  const [beamSpeed, setBeamSpeed] = useState<number>(5); // 1-10
+  const [persistence, setPersistence] = useState<number>(1000); // ms
   
   // Custom Content State
   const [customPoints, setCustomPoints] = useState<VectorPoint[]>([]);
@@ -92,7 +96,7 @@ const App: React.FC = () => {
                 </h1>
             </div>
             <div className="flex gap-2 text-xs font-mono text-green-700">
-                <span>SYS.VER.2.2</span>
+                <span>SYS.VER.2.3</span>
                 <span className="animate-pulse text-vector-green">ONLINE</span>
             </div>
         </div>
@@ -151,7 +155,7 @@ const App: React.FC = () => {
                  </button>
             </div>
 
-            {/* Contextual Controls */}
+            {/* Contextual Inputs */}
             {contentMode === ContentMode.DRAW && (
                 <div className="flex items-center justify-between bg-black/40 p-2 rounded border border-dashed border-green-900/50 text-xs font-mono">
                     <span className="text-gray-400">Click on screen to plot vectors.</span>
@@ -174,6 +178,34 @@ const App: React.FC = () => {
                 </div>
             )}
 
+            {/* Control Panel */}
+            <div className="grid grid-cols-2 gap-4 bg-neutral-900/30 p-3 rounded border border-green-900/20">
+                <div className="flex flex-col gap-2">
+                    <label className="text-xs font-mono text-green-600 flex items-center gap-2">
+                        <Activity className="w-3 h-3" /> FREQUENCY (SPEED)
+                    </label>
+                    <input 
+                        type="range" 
+                        min="1" max="10" step="1" 
+                        value={beamSpeed}
+                        onChange={(e) => setBeamSpeed(Number(e.target.value))}
+                        className="w-full h-1 bg-green-900/30 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-vector-green [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                </div>
+                <div className="flex flex-col gap-2">
+                    <label className="text-xs font-mono text-green-600 flex items-center gap-2">
+                        <Zap className="w-3 h-3" /> PHOSPHOR PERSISTENCE
+                    </label>
+                    <input 
+                        type="range" 
+                        min="200" max="3000" step="100" 
+                        value={persistence}
+                        onChange={(e) => setPersistence(Number(e.target.value))}
+                        className="w-full h-1 bg-green-900/30 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-vector-green [&::-webkit-slider-thumb]:rounded-full"
+                    />
+                </div>
+            </div>
+
             {/* CRT Display */}
             <RetroScreen 
                 mode={mode} 
@@ -181,6 +213,8 @@ const App: React.FC = () => {
                 customPoints={customPoints}
                 customText={customText}
                 onCanvasClick={handleCanvasClick}
+                beamSpeed={beamSpeed}
+                persistence={persistence}
             />
 
             {/* Dynamic Content Box */}
@@ -190,7 +224,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Right Column: Chat Interface */}
-        <div className="lg:col-span-5 flex flex-col h-[600px] lg:h-[850px] bg-neutral-900/30 border border-green-900/30 rounded-lg overflow-hidden">
+        <div className="lg:col-span-5 flex flex-col h-[600px] lg:h-[960px] bg-neutral-900/30 border border-green-900/30 rounded-lg overflow-hidden">
             <div className="p-4 border-b border-green-900/30 bg-black/40 flex items-center gap-2">
                 <Terminal className="w-4 h-4" />
                 <span className="font-mono text-sm font-bold">ENGINEER.UPLINK</span>

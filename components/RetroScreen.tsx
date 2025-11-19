@@ -9,6 +9,8 @@ interface RetroScreenProps {
   customPoints: VectorPoint[];
   customText: string;
   onCanvasClick: (x: number, y: number) => void;
+  beamSpeed: number; // 1-10
+  persistence: number; // ms
 }
 
 // Pre-defined Ship Shape
@@ -28,7 +30,9 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
   contentMode, 
   customPoints, 
   customText,
-  onCanvasClick 
+  onCanvasClick,
+  beamSpeed,
+  persistence
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,7 +99,7 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
     const yScale = d3.scaleLinear().domain([0, 100]).range([margin, height - margin]);
 
     // 2. BACKGROUND GRID (Always draw this first)
-    const gridGroup = svg.append("g").attr("class", "grid").attr("opacity", 0.15);
+    const gridGroup = svg.append("g").attr("class", "grid").attr("opacity", 0.1);
     
     // Horizontal lines
     for(let i = 0; i <= 100; i+=10) {
@@ -141,25 +145,15 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
     if (mode === DisplayMode.VECTOR) {
         // --- VECTOR MODE ---
         
-        // Draw Paths
-        shapesToDraw.forEach(shape => {
+        // We draw shapes invisible initially, then beam reveals them, then they fade
+        shapesToDraw.forEach((shape, idx) => {
             let points = shape.points;
             if (points.length === 0) return;
             if (shape.closed) points = [...points, points[0]];
             
-            // The glowy path
-            svg.append("path")
-                .datum(points)
-                .attr("d", lineGenerator)
-                .attr("fill", "none")
-                .attr("stroke", "#39ff14")
-                .attr("stroke-width", 2)
-                .attr("stroke-linejoin", "round")
-                .attr("stroke-linecap", "round")
-                .attr("filter", "drop-shadow(0 0 4px #39ff14)")
-                .attr("opacity", 0.9);
-
-            // Draw Vertices for Draw Mode
+            // Define the path but make it invisible initially or very dim
+            // We'll actually redraw this path in the animation loop to handle fade cleanly
+            // Just draw vertices for helper in DRAW mode
             if (contentMode === ContentMode.DRAW) {
                 svg.selectAll(`.vertex-${shape.id}`)
                     .data(points)
@@ -167,8 +161,9 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
                     .append("circle")
                     .attr("cx", d => xScale(d.x))
                     .attr("cy", d => yScale(d.y))
-                    .attr("r", 3)
-                    .attr("fill", "#fff");
+                    .attr("r", 2)
+                    .attr("fill", "#39ff14")
+                    .attr("opacity", 0.3);
             }
         });
 
@@ -180,7 +175,10 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
                 .attr("filter", "drop-shadow(0 0 8px #ffffff)")
                 .attr("opacity", 0);
 
-            const animateBeam = async () => {
+            // Group to hold temporary fading paths
+            const pathGroup = svg.append("g").attr("class", "phosphor-trails");
+
+            const animateVectorCycle = async () => {
                 if (!isMounted) return;
 
                 for (const shape of shapesToDraw) {
@@ -189,91 +187,175 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
                     if (points.length < 1) continue;
                     if (shape.closed) points = [...points, points[0]];
 
-                    // Move to start (Jump)
+                    // Move beam to start position (blanking)
                     const startX = xScale(points[0].x);
                     const startY = yScale(points[0].y);
                     
                     beam.attr("opacity", 0).attr("cx", startX).attr("cy", startY);
                     
-                    // Small delay for "blanking interval"
-                    await new Promise(r => setTimeout(r, 50));
+                    // Short delay for blanking based on speed
+                    await new Promise(r => setTimeout(r, 200 / beamSpeed));
                     if (!isMounted) return;
 
-                    beam.attr("opacity", 1);
-
-                    // If it's a single point (like in early draw mode)
+                    // If it's a single point (Draw mode start)
                     if (points.length === 1) {
+                        beam.attr("opacity", 1);
+                        // Flash a dot
+                        const dot = pathGroup.append("circle")
+                            .attr("cx", startX)
+                            .attr("cy", startY)
+                            .attr("r", 2)
+                            .attr("fill", "#39ff14")
+                            .attr("opacity", 1);
+                        
+                        dot.transition()
+                            .duration(persistence)
+                            .attr("opacity", 0)
+                            .remove();
+
                         await new Promise(r => setTimeout(r, 100));
                         continue;
                     }
 
-                    // Trace path
-                    const tempPath = svg.append("path")
-                        .datum(points)
-                        .attr("d", lineGenerator)
-                        .style("opacity", 0);
-                    
-                    const len = tempPath.node()?.getTotalLength() || 0;
-                    tempPath.remove();
+                    // Create the path we are about to draw
+                    // We use a temporary path to calculate length, then render the visual path
+                    const pathData = lineGenerator(points);
+                    if (!pathData) continue;
 
+                    // Render the "Phosphor" path
+                    // It starts hidden, then reveals as beam moves, then fades
+                    const phosphorPath = pathGroup.append("path")
+                        .attr("d", pathData)
+                        .attr("fill", "none")
+                        .attr("stroke", "#39ff14")
+                        .attr("stroke-width", 2)
+                        .attr("stroke-linejoin", "round")
+                        .attr("stroke-linecap", "round")
+                        .attr("filter", "drop-shadow(0 0 4px #39ff14)")
+                        .attr("opacity", 1); // Start visible for drawing
+
+                    const len = phosphorPath.node()?.getTotalLength() || 0;
+                    
+                    // Set dash array to hide it initially
+                    phosphorPath
+                        .attr("stroke-dasharray", `${len} ${len}`)
+                        .attr("stroke-dashoffset", len);
+
+                    beam.attr("opacity", 1);
+
+                    // SPEED CALCULATION:
+                    // Base duration adjusted by beamSpeed (1-10). 
+                    // Higher speed = lower duration.
+                    // 1 = slow, 10 = fast.
+                    const drawDuration = (len * 15) / (beamSpeed * 0.8); 
+
+                    // Animate Beam & Path Reveal
                     if (len > 0) {
+                        // 1. Reveal the path (stroke-dashoffset)
+                        phosphorPath.transition()
+                            .duration(drawDuration)
+                            .ease(d3.easeLinear)
+                            .attr("stroke-dashoffset", 0)
+                            .on("end", () => {
+                                // 2. Once drawn (or as it draws?), Start Decay
+                                // To simulate persistence, the whole line fades out after drawn
+                                phosphorPath.transition()
+                                    .duration(persistence)
+                                    .ease(d3.easeExpOut) // Fade out curve
+                                    .attr("opacity", 0)
+                                    .remove();
+                            });
+
+                        // 2. Move the Beam
                         await beam.transition()
-                            .duration(len * 3) // Speed based on length
+                            .duration(drawDuration)
                             .ease(d3.easeLinear)
                             .attrTween("cx", () => (t) => {
-                                const p = tempPath.node()?.getPointAtLength(t * len);
+                                const p = phosphorPath.node()?.getPointAtLength(t * len);
                                 return p ? p.x.toString() : startX.toString();
                             })
                             .attrTween("cy", () => (t) => {
-                                const p = tempPath.node()?.getPointAtLength(t * len);
+                                const p = phosphorPath.node()?.getPointAtLength(t * len);
                                 return p ? p.y.toString() : startY.toString();
                             })
                             .end()
-                            .catch(() => {}); // Catch interruption errors
+                            .catch(() => {}); 
                     }
                 }
 
                 if (isMounted) {
-                    setTimeout(animateBeam, 200);
+                    // Recursion for the loop
+                    // Delay slightly before restarting frame to simulate refresh rate
+                    // High speed = low delay
+                    setTimeout(animateVectorCycle, 100 / beamSpeed);
                 }
             };
-            animateBeam();
+            
+            animateVectorCycle();
         }
 
     } else {
         // --- RASTER MODE ---
-        // OPTIMIZED: Do not draw 5000 rects. Draw dashed lines to simulate pixels.
         
+        // Render static-ish shapes but make them fade unless refreshed
+        const rasterGroup = svg.append("g").attr("class", "raster-content");
+
         shapesToDraw.forEach(shape => {
             let points = shape.points;
             if (points.length === 0) return;
             if (shape.closed) points = [...points, points[0]];
 
-            // Draw a "staircase" line or dashed line to simulate raster
-            // We simply use the path but style it to look pixelated
-            svg.append("path")
+            // Raster lines
+            rasterGroup.append("path")
                 .datum(points)
                 .attr("d", lineGenerator)
                 .attr("fill", "none")
-                .attr("stroke", "rgba(57, 255, 20, 0.7)")
+                .attr("stroke", "rgba(57, 255, 20, 0.8)") // Start bright
                 .attr("stroke-width", 4)
-                .attr("stroke-dasharray", "4, 4") // Pixelated effect
+                .attr("stroke-dasharray", "4, 4") 
                 .attr("stroke-linecap", "butt") 
-                .attr("shape-rendering", "crispEdges") // Disable anti-aliasing
+                .attr("shape-rendering", "crispEdges")
                 .attr("filter", "drop-shadow(0 0 2px #39ff14)");
         });
 
-        // Raster Scanline Effect
+        // Fade the entire raster content out constantly
+        // The scanline resets it.
+        // Since we can't easily detect "collision" of scanline with SVG elements efficiently in React/D3 loop,
+        // We will simulate it: 
+        // 1. Image fades to 0.
+        // 2. Scanline runs.
+        // 3. When scanline finishes, we flash the image back to 1? 
+        // Better: Image opacity is handled by a separate loop or just simple fade-in-out loop synced with scanline.
+        
+        const scanDuration = 5000 / beamSpeed;
+
+        // Scanline Beam
         const scanline = svg.append("line")
             .attr("x1", 0).attr("x2", width)
             .attr("y1", 0).attr("y2", 0)
-            .attr("stroke", "rgba(255, 255, 255, 0.3)")
-            .attr("stroke-width", 2);
+            .attr("stroke", "rgba(255, 255, 255, 0.5)")
+            .attr("stroke-width", 2)
+            .attr("filter", "drop-shadow(0 0 4px white)");
 
         const runScanline = () => {
             if(!isMounted) return;
+
+            // Reset image opacity to 1 (Simulating the scanline refreshing the phosphors)
+            // Actually, in raster, top refreshes before bottom.
+            // Let's simple simulate "Screen Refresh": Fade out slowly, Flash in when scanline passes?
+            // Let's just fade the group out over persistence, and reset it at start of scan?
+            // Close enough for demo.
+            
+            rasterGroup.attr("opacity", 1);
+            rasterGroup.transition()
+                .duration(persistence + scanDuration) // Stays visible while scanning + persistence
+                .ease(d3.easeLinear)
+                .attr("opacity", 0.2); // Don't go fully black in raster usually, ghosting remains
+
             scanline.attr("y1", 0).attr("y2", 0)
-                .transition().duration(2000).ease(d3.easeLinear)
+                .transition()
+                .duration(scanDuration)
+                .ease(d3.easeLinear)
                 .attr("y1", height).attr("y2", height)
                 .on("end", runScanline);
         };
@@ -285,10 +367,10 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
         svg.selectAll("*").interrupt();
     };
 
-  }, [dimensions, mode, contentMode, customPoints, customText]);
+  }, [dimensions, mode, contentMode, customPoints, customText, beamSpeed, persistence]);
 
   return (
-    <div ref={containerRef} className="w-full h-80 md:h-[500px] relative group select-none">
+    <div ref={containerRef} className="w-full h-80 md:h-[500px] relative group select-none animate-flicker">
       {/* CRT Frame */}
       <div className="absolute inset-0 bg-[#050505] rounded-[3rem] shadow-[inset_0_0_40px_rgba(0,0,0,0.8),0_0_0_15px_#1a1a1a] overflow-hidden border-4 border-[#2a2a2a]">
         
@@ -308,8 +390,10 @@ const RetroScreen: React.FC<RetroScreenProps> = ({
       </div>
       
       {/* Badge */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 bg-black/80 px-3 py-1 rounded text-[10px] font-mono text-vector-green border border-vector-dim uppercase tracking-widest opacity-70 pointer-events-none">
-        {contentMode} : {mode}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 bg-black/80 px-3 py-1 rounded text-[10px] font-mono text-vector-green border border-vector-dim uppercase tracking-widest opacity-70 pointer-events-none flex gap-2">
+        <span>{contentMode}</span>
+        <span className="text-gray-500">|</span>
+        <span>{mode}</span>
       </div>
     </div>
   );
