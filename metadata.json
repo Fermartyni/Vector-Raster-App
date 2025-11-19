@@ -1,0 +1,5 @@
+{
+  "name": "Vector Console Explorer",
+  "description": "An interactive educational tool explaining the technology behind vector graphics displays and vintage video game consoles using Gemini API and D3 visualizations.",
+  "requestFramePermissions": []
+}
